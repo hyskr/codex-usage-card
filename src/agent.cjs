@@ -1213,7 +1213,7 @@ function windowsCodexCandidates(appPath) {
     path.join(root, 'resources', 'codex-cli', 'codex.exe')];
 }
 
-var AGENT_VERSION = '1.0.2';
+var AGENT_VERSION = '1.0.3';
 function parseArgs(argv) {
   const options = {
     port: Number(process.env.CODEX_BADGE_PORT) || 39222,

@@ -70,7 +70,7 @@ global.fetch = async () => { throw new Error('no window in fixture'); };
     const directory = path.join(temporary, 'Library/Application Support/CodexUsageBadge');
     assert.equal(fs.readFileSync(path.join(directory, 'agent.cjs'), 'utf8'), fs.readFileSync(path.join(runtime, 'agent.cjs'), 'utf8'));
     assert.equal(fs.readFileSync(path.join(directory, 'badge-tokenizer.cjs'), 'utf8'), fs.readFileSync(path.join(runtime, 'badge-tokenizer.cjs'), 'utf8'));
-    assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'installed-version.json'))).version, '1.0.2');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'installed-version.json'))).version, '1.0.3');
     await manager.install();
     await manager.uninstall();
     assert.equal(fs.existsSync(directory), false);
