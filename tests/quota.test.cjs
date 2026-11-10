@@ -49,8 +49,8 @@ async function testRendererBridge() {
       let value;
       if (message.method === 'Runtime.evaluate') {
         value = message.params.expression.includes('status()')
-          ? { version: 71, placed: true, badgeCount: 1 }
-          : 71;
+          ? { version: 72, placed: true, badgeCount: 1 }
+          : 72;
       }
       queueMicrotask(() => this.dispatch('message', { data: JSON.stringify({
         id: message.id, result: { result: { value } },

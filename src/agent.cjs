@@ -196,7 +196,7 @@ class AppServerClient extends require('node:events').EventEmitter {
 }
 
 function installUsageBadge(countTokens) {
-  const VERSION = 71;
+  const VERSION = 72;
   const KEY = '__codexUsageBadge';
   if (window[KEY]?.version === VERSION && window[KEY]?.scope === 'quota-and-speed') {
     window[KEY].place();
@@ -577,7 +577,7 @@ function installUsageBadge(countTokens) {
     if (element.querySelector('.usage-window').textContent !== meter.label) element.querySelector('.usage-window').textContent = meter.label;
     if (element.querySelector('.usage-number').textContent !== number) element.querySelector('.usage-number').textContent = number;
     const ring = element.querySelector('.usage-ring-value');
-    ring.style.stroke = percent === null ? '' : usageRingColor(percent);
+    ring.style.stroke = percent === null ? '' : usageRingColor(element === contextMeter ? 100 - rawPercent : rawPercent);
     ring.style.strokeDashoffset = String(100 - (rawPercent ?? 0));
     ring.style.opacity = percent !== null && percent > 0 ? '1' : '0';
     if (accessible) {
@@ -1152,13 +1152,13 @@ class RendererInjector {
         try{
           if(!existing)await session.connect();
           const version = await session.evaluate('window.__codexUsageBadge?.version');
-          if (version?.result?.value !== 71) await session.evaluate(buildBootstrapScript());
+          if (version?.result?.value !== 72) await session.evaluate(buildBootstrapScript());
           if(this.currentValue)await session.evaluate(`window.__codexUsageBadge?.update(${JSON.stringify(this.currentValue)})`);
           // CDP success is NOT UI acceptance. Query the mounted, visible Ring separately
           // and retain only a fixed reason code (never host DOM, paths or account text).
           const checked=(await session.evaluate('window.__codexUsageBadge?.status() ?? null'))?.result?.value;
           const allowed=new Set(['mounted','not-placed','no-visible-rail','no-valid-footer','no-safe-space','occluded-or-clipped']);
-          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 71;
+          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 72;
           const reason=mounted?'mounted':allowed.has(checked?.mountReason)?checked.mountReason:'no-verified-ui';
           this.mountStatus.set(t.id,{mounted,reason});
           if(this.stopped){session.close();return;}
@@ -1213,7 +1213,7 @@ function windowsCodexCandidates(appPath) {
     path.join(root, 'resources', 'codex-cli', 'codex.exe')];
 }
 
-var AGENT_VERSION = '1.0.3';
+var AGENT_VERSION = '1.0.4';
 function parseArgs(argv) {
   const options = {
     port: Number(process.env.CODEX_BADGE_PORT) || 39222,

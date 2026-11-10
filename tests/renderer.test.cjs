@@ -47,6 +47,8 @@ async function testSelectedConversation() {
     method: 'account/rateLimits/updated', hostId: 'remote', params: { rateLimits: {} } } }));
   assert.equal(quotaNotifications.length, 1);
   usage(a, 42);
+  const contextRing = window.document.querySelector('.usage-context .usage-ring-value');
+  const lowColor = contextRing.style.stroke;
   usage(b, 99);
   assert.equal(number('usage-cache'), '42');
   assert.equal(number('usage-context'), '42');
@@ -55,6 +57,9 @@ async function testSelectedConversation() {
   await new Promise(resolve => setTimeout(resolve, 600));
   assert.equal(number('usage-cache'), '99');
   assert.equal(number('usage-context'), '99');
+  const highColor = contextRing.style.stroke;
+  const channels = color => color.match(/\d+/g).map(Number);
+  assert.ok(channels(highColor)[0] > channels(lowColor)[0], 'higher context usage has more red');
   window.__codexUsageBadge.destroy();
   window.close();
 }
