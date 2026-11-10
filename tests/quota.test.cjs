@@ -24,6 +24,9 @@ async function testRefreshNotification() {
 async function testRendererBridge() {
   const originalFetch = global.fetch;
   const OriginalWebSocket = global.WebSocket;
+  const childProcess = require('node:child_process');
+  const originalExecFile = childProcess.execFile;
+  childProcess.execFile = (file, args, options, callback) => callback(null, JSON.stringify({ apps: [{ argumentsKnown: true, debugPort: '62104' }] }));
   let socket;
   class FakeWebSocket {
     static OPEN = 1;
@@ -58,13 +61,14 @@ async function testRendererBridge() {
   global.WebSocket = FakeWebSocket;
   global.fetch = async () => ({ ok: true, json: async () => [{
     id: 'main', type: 'page', url: 'app://-/index.html',
-    webSocketDebuggerUrl: 'ws://127.0.0.1:39222/devtools/page/main',
+    webSocketDebuggerUrl: 'ws://127.0.0.1:62104/devtools/page/main',
   }] });
   try {
     const received = [];
     const injector = new RendererInjector({ port: 39222 });
     injector.onRateLimits = patch => received.push(patch);
     await injector.scan();
+    assert.equal(injector.activePort, 62104);
     assert.ok(socket.methods.some(message => message.method === 'Runtime.addBinding' &&
       message.params.name === '__codexUsageBadgeQuotaUpdated'));
     socket.dispatch('message', { data: JSON.stringify({ method: 'Runtime.bindingCalled',
@@ -72,6 +76,7 @@ async function testRendererBridge() {
     assert.equal(received[0].rateLimits.primary.usedPercent, 83);
     injector.stop();
   } finally {
+    childProcess.execFile = originalExecFile;
     global.fetch = originalFetch;
     global.WebSocket = OriginalWebSocket;
   }

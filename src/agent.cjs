@@ -1080,12 +1080,12 @@ function buildBootstrapScript() {
   return `(() => { ${tokenizer}\n(${installUsageBadge.toString()})(badgeTokenizer.countTokens); })()`;
 }
 class CdpSession {
-  constructor(target, onRateLimits) {this.target=target;this.onRateLimits=onRateLimits;this.pending=new Map();this.serial=0;this.socket=null;}
+  constructor(target, onRateLimits, port) {this.port=port;this.target=target;this.onRateLimits=onRateLimits;this.pending=new Map();this.serial=0;this.socket=null;}
   async connect() {
     let u;
     try {u=new URL(this.target.webSocketDebuggerUrl);}
     catch {throw new Error('CDP must use loopback WebSocket port 39222');}
-    if(u.protocol!=='ws:' || !['127.0.0.1','localhost','[::1]'].includes(u.hostname) || u.port!=='39222') throw new Error('CDP must use loopback WebSocket port 39222');
+    if(u.protocol!=='ws:' || !['127.0.0.1','localhost','[::1]'].includes(u.hostname) || u.port!==String(this.port)) throw new Error('CDP must use loopback WebSocket port 39222');
     const ws=new WebSocket(u);this.socket=ws;
     ws.addEventListener('message',event=>{
       let msg;try{msg=JSON.parse(event.data);}catch{return;}
@@ -1123,18 +1123,32 @@ class CdpSession {
   close(){this.rejectPending();this.socket?.close();this.socket=null;}
 }
 class RendererInjector {
-  constructor({port}){if(port!==39222)throw new Error('CDP must use port 39222');this.port=39222;this.sessions=new Map();this.mountStatus=new Map();this.currentValue=null;this.scanning=false;this.stopped=false;}
+  constructor({port, appPath}){this.port=port;this.appPath=appPath;this.sessions=new Map();this.mountStatus=new Map();this.currentValue=null;this.scanning=false;this.stopped=false;}
   async scan(){
     if(this.scanning||this.stopped)return;
     this.scanning=true;
     try{
-      const res=await fetch('http://127.0.0.1:39222/json/list',{signal:AbortSignal.timeout(3000)});
+      const { execFile } = require('node:child_process');
+      const path = require('node:path');
+      const bridge = path.join(require('node:os').homedir(), 'Library/Application Support/CodexUsageBadge/startup-helper/bridge');
+      const snapshot = await new Promise((resolve, reject) => execFile(bridge, ['snapshot', this.appPath], { timeout: 15000 }, (error, stdout) => {
+        if (error) return reject(error);
+        try { resolve(JSON.parse(stdout)); } catch (failure) { reject(failure); }
+      }));
+      const apps = snapshot.apps ?? [];
+      const detected = apps.length === 1 && apps[0].argumentsKnown ? Number(apps[0].debugPort) : 0;
+      const port = Number.isInteger(detected) && detected > 0 && detected <= 65535 ? detected : this.port;
+      if (this.activePort !== port) {
+        for (const session of this.sessions.values()) session.close();
+        this.sessions.clear(); this.mountStatus.clear(); this.activePort = port;
+      }
+      const res=await fetch(`http://127.0.0.1:${port}/json/list`,{signal:AbortSignal.timeout(3000)});
       if(!res.ok)throw new Error('CDP unavailable');
       const pages=(await res.json()).filter(t=>t.type==='page'&&isMainWindow(t)&&typeof t.webSocketDebuggerUrl==='string');
       const live=new Set(pages.map(t=>t.id));
       for(const[id,s]of this.sessions)if(!live.has(id)){s.close();this.sessions.delete(id);this.mountStatus.delete(id);}
       await Promise.all(pages.map(async t=>{
-        const existing=this.sessions.get(t.id), session=existing || new CdpSession(t, patch => this.onRateLimits?.(patch));
+        const existing=this.sessions.get(t.id), session=existing || new CdpSession(t, patch => this.onRateLimits?.(patch), port);
         try{
           if(!existing)await session.connect();
           const version = await session.evaluate('window.__codexUsageBadge?.version');
@@ -1269,7 +1283,7 @@ async function main() {
   options.codexBin = resolveCodexBin(options.codexBin, options.appPath);
   log(`codex-usage-card v${AGENT_VERSION} started: local quota connection; no in-app version checks.`);
 
-  const injector = new RendererInjector({ port: options.port });
+  const injector = new RendererInjector({ port: options.port, appPath: options.appPath });
   let stopped = false;
   let client = null;
   let pending = false;

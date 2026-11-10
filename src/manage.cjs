@@ -419,16 +419,21 @@ async function installUnlocked({manualTest,approvedClient}) {
   console.log(allowClientRestart?`已安装 v${VERSION}，自动更新已关闭。完全退出客户端后，从原来的 Codex 图标打开，等待 5–10 秒。`:`已安装 v${VERSION}（手动验收模式），自动更新已关闭。未清理 Dock/Launchpad；启动助手仅观察，不会自动退出、打开或聚焦 Codex。`);
 }
 async function targets() {
-  const response=await fetch('http://127.0.0.1:39222/json/list',{signal:AbortSignal.timeout(2000)});
+  const bridge = fs.existsSync(path.join(startupDir, 'bridge')) ? path.join(startupDir, 'bridge') : bridgeSource;
+  const snapshot = JSON.parse(command(bridge, ['snapshot', app]));
+  const apps = snapshot.apps ?? [];
+  const detected = apps.length === 1 && apps[0].argumentsKnown ? Number(apps[0].debugPort) : 0;
+  const port = Number.isInteger(detected) && detected > 0 && detected <= 65535 ? detected : 39222;
+  const response=await fetch(`http://127.0.0.1:${port}/json/list`,{signal:AbortSignal.timeout(2000)});
   if(!response.ok)throw new Error('本机端口暂不可连接');
-  return (await response.json()).filter(t=>t.type==='page'&&isMainWindow(t)&&t.webSocketDebuggerUrl);
+  return (await response.json()).filter(t=>t.type==='page'&&isMainWindow(t)&&t.webSocketDebuggerUrl).map(t=>({...t, port}));
 }
 async function cdp(target,method,params) {
   let endpoint;
   try { endpoint=new URL(target?.webSocketDebuggerUrl); }
   catch { throw new Error('CDP must use loopback WebSocket port 39222'); }
   if(endpoint.protocol!=='ws:' || !['127.0.0.1','localhost','[::1]'].includes(endpoint.hostname) ||
-      endpoint.port!=='39222' || endpoint.username || endpoint.password) {
+      endpoint.port!==String(target.port) || endpoint.username || endpoint.password) {
     throw new Error('CDP must use loopback WebSocket port 39222');
   }
   const ws=new WebSocket(endpoint);
