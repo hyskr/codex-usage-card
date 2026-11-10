@@ -180,7 +180,7 @@ class AppServerClient extends require('node:events').EventEmitter {
 }
 
 function installUsageBadge(countTokens) {
-  const VERSION = 68;
+  const VERSION = 69;
   const KEY = '__codexUsageBadge';
   if (window[KEY]?.version === VERSION && window[KEY]?.scope === 'quota-and-speed') {
     window[KEY].place();
@@ -384,6 +384,7 @@ function installUsageBadge(countTokens) {
   let rail = null;
   let footer = null;
   let mountReason = 'not-placed';
+  let lastBadgeRect = null;
   let disposed = false;
   const nativeOverlaySelector = '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open], [popover]';
   let observedOverlayNodes = new Set();
@@ -430,8 +431,11 @@ function installUsageBadge(countTokens) {
           if (['hidden','clip','auto','scroll'].includes(css.overflowY)) { top=Math.max(top,clip.top);bottom=Math.min(bottom,clip.bottom); }
         }
       }
-      // Yield even when only part of native UI is visible; Ring visibility is stricter.
-      return right > left && bottom > top;
+      const badgeRect = !badge.hidden ? badge.getBoundingClientRect() : lastBadgeRect;
+      const tooltipRect = !tooltip.hidden ? tooltip.getBoundingClientRect() : null;
+      return [badgeRect, tooltipRect].some(rect => rect && rect.width > 0 && rect.height > 0 &&
+        right > Math.max(left, rect.left) && left < Math.min(right, rect.right) &&
+        bottom > Math.max(top, rect.top) && top < Math.min(bottom, rect.bottom));
     });
   }
   function yieldToNativeOverlay() {
@@ -947,6 +951,7 @@ function installUsageBadge(countTokens) {
     badge.style.left=target.left+'px';
     badge.style.top=target.top+'px';
     badge.hidden=false;
+    lastBadgeRect = badge.getBoundingClientRect();
     mountReason=badgeVisible() ? 'mounted' : 'occluded-or-clipped';
     if (mountReason !== 'mounted') { badge.hidden=true;hideTooltip(); }
     else if (!tooltip.hidden) positionTooltip();
@@ -1078,13 +1083,13 @@ class RendererInjector {
         try{
           if(!existing)await session.connect();
           const version = await session.evaluate('window.__codexUsageBadge?.version');
-          if (version?.result?.value !== 68) await session.evaluate(buildBootstrapScript());
+          if (version?.result?.value !== 69) await session.evaluate(buildBootstrapScript());
           if(this.currentValue)await session.evaluate(`window.__codexUsageBadge?.update(${JSON.stringify(this.currentValue)})`);
           // CDP success is NOT UI acceptance. Query the mounted, visible Ring separately
           // and retain only a fixed reason code (never host DOM, paths or account text).
           const checked=(await session.evaluate('window.__codexUsageBadge?.status() ?? null'))?.result?.value;
           const allowed=new Set(['mounted','not-placed','no-visible-rail','no-valid-footer','no-safe-space','occluded-or-clipped']);
-          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 68;
+          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 69;
           const reason=mounted?'mounted':allowed.has(checked?.mountReason)?checked.mountReason:'no-verified-ui';
           this.mountStatus.set(t.id,{mounted,reason});
           if(this.stopped){session.close();return;}
@@ -1139,7 +1144,7 @@ function windowsCodexCandidates(appPath) {
     path.join(root, 'resources', 'codex-cli', 'codex.exe')];
 }
 
-var AGENT_VERSION = '0.9.5';
+var AGENT_VERSION = '1.0.0';
 function parseArgs(argv) {
   const options = {
     port: Number(process.env.CODEX_BADGE_PORT) || 39222,
@@ -1234,7 +1239,7 @@ async function main() {
       const hasMountedRing = [...(injector.mountStatus?.values?.() ?? [])].some(status => status?.mounted === true);
       if (!connected && hasSession) log('主窗口 CDP 已连接（不代表 Ring 已显示）。');
       if (!mounted && hasMountedRing) log('Ring 已挂载并确认可见。');
-      if (mounted && !hasMountedRing) log('Ring 挂载状态已失效，等待重新确认。');
+      if (mounted && !hasMountedRing) log(`Ring 挂载状态已失效：${[...injector.mountStatus.values()].map(status => status.reason).join(', ') || '窗口未连接'}。`);
       connected = hasSession;
       mounted = hasMountedRing;
     } catch {

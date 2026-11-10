@@ -1,67 +1,41 @@
-# macOS Installation & Troubleshooting
+# macOS 使用说明
 
-This document applies to the **Codex Usage Card v0.9.4 Beta public candidate** (macOS), not the original project's other releases. This is an unofficial add-on, not an OpenAI product. This version has been installed and checked on one Mac: launch from the original Codex icon, automatic Ring display, usage readings and UI VERSION 53 all passed. Startup takes a few seconds longer than the previous version; this is a known experience difference. Other devices and future Codex versions remain unverified.
+## 安装与升级
 
-## Before installing
+从 [Releases](https://github.com/hyskr/codex-usage-card/releases/latest) 下载 ZIP 并完整解压，双击 **安装.command**。已有 Codex Usage Badge 安装可使用同一入口升级。
 
-1. Install and sign in to the Codex desktop app. Its associated Codex CLI must be accessible.
-2. Have Node.js 24+ available. The `.command` entry script first checks common Node executables bundled with the app, then the system-installed `node`.
-3. After publication, download the exact ZIP from the **public Codex Usage Card Release**, not from another repository. Compare `shasum -a 256 <downloaded-file>.zip` with the corresponding SHA256 published separately.
-4. Keep a copy of your work. The installation registers background tasks, and subsequent first launch may perform a protected restart of Codex.
-5. This build has an ad-hoc-signed native helper and is **not notarized by Apple**. Do not disable macOS security globally to run it.
+安装程序会检查客户端和 Node.js，复制运行文件并注册当前用户的后台任务。对于未在兼容性清单中验证的客户端版本，按终端提示决定是否继续。安装后完全退出 Codex，再从原来的应用图标打开。后台启动助手可能在符合条件时进行一次受控重启，以启用本机调试连接。
 
-## Install
+安装器使用的启动助手采用临时签名，尚未经过 Apple 公证。macOS 可能要求通过系统设置允许打开安装入口。安装程序本身不提供自动更新，升级时下载新的发布包并重新运行安装入口。
 
-Fully extract `CodexUsageCard-macOS-0.9.4.zip`. Keep the extracted folder intact. Use either the included `安装.command` or, from the folder containing `manage.cjs`:
+## 查看状态
 
-```bash
-node --version
-node manage.cjs install
+双击 **诊断.command**，或在解压目录执行：
+
+```sh
+./scripts/mac-entry.sh status
 ```
 
-The Node version must be 24 or newer if using the direct `node` command. If you previously installed in a manual-test/observation-only mode, the saved `allowClientRestart=false` setting may remain in place. Ordinary reinstall does **not** necessarily reset that safety policy. In such a case, do not change it blindly; request guidance with sanitized details.
+状态可能包含本机路径和用量信息，分享前请检查内容。
 
-The add-on installs into `~/Library/Application Support/CodexUsageBadge` and registers per-user Agent/Startup launch tasks. It does not patch `Codex.app`. Installation does **not** call the retained legacy cleanup code: it does not automatically change Dock/Launchpad configuration, restart Dock, or move older shortcuts. Existing legacy shortcuts remain for you to review separately.
+## 卸载
 
-## First launch
+双击 **卸载.command**，或在解压目录执行：
 
-Save your work, quit Codex completely with **⌘Q**, and open the **original Codex icon** as normal. The helper observes new launches. If its protective conditions are met, it may request an orderly quit and relaunch Codex once with a localhost debugging endpoint, allowing the card to be injected. Existing active windows, recent user input, other instances, or cooldown may prevent a handoff. It should not forcibly terminate Codex or repeatedly grab focus.
-
-The current implementation requires a local CDP endpoint at `127.0.0.1:39222`. Before connecting, the manager requires `ws:`, a loopback host and port `39222`; it rejects other endpoints. This interface is powerful and **not authenticated simply because it is localhost**. Do not forward, proxy or expose it.
-
-## Inspect status
-
-From the extracted release folder:
-
-```bash
-node manage.cjs status
+```sh
+./scripts/mac-entry.sh uninstall
 ```
 
-Expected for a working installation: Agent/Startup running, usage card present, a current valid rate-limit value, and updater disabled. `UI VERSION 53` identifies the reviewed sidebar component, not the software release number. Some plans or account states may legitimately show only one ring or no available rate-limit reading.
+卸载会停止徽标的后台任务并将安装文件与日志移入废纸篓。
 
-**Privacy:** Status output can include your local account paths, account-related values and other operational details. Do not post raw output or logs publicly.
+## 常见情况
 
-## Troubleshooting
-
-| Symptom | First check |
+| 现象 | 处理方式 |
 | --- | --- |
-| Installer says Node missing | Check Node.js 24+ or a compatible bundled executable. |
-| Usage card missing after ordinary launch | Quit Codex, then launch it once normally; if still missing, inspect sanitized Startup status. Prior manual-test settings may disable automatic handoff. |
-| Slow launch or repeated relaunch | Stop retrying and preserve sanitized timestamps. Avoid modifying startup settings without identifying the cause. |
-| Percent missing or stale | Confirm you are signed in, network is available, and the CLI supports rate-limit data for your account. |
-| Works until a Codex update | The internal app-server or renderer UI may have changed. Check the public release page for a compatible update. |
-| Updater appears enabled | Do not use legacy updater commands or upstream release ZIPs. Confirm task ownership and settings before changing anything. |
+| 提示找不到 Node.js | 打开 Codex 一次，或安装 Node.js 24 或更新版本。 |
+| 没有看到徽标 | 完全退出 Codex 后重新打开，等待数秒，再运行诊断。 |
+| 上下文或缓存显示横线 | 等当前会话产生新的用量数据。无法识别当前会话时也会显示横线。 |
+| 模型速度为空 | 启用 Codex Token Bar 的本地正文测速，等待合格样本。 |
+| 更新 Codex 后徽标消失 | 查看诊断结果和本项目的最新 Release。 |
 
-## Uninstall
-
-From the extracted release folder:
-
-```bash
-node manage.cjs uninstall
-```
-
-Uninstall stops the add-on tasks and moves its relevant installed files/logs and any verified owned legacy launcher entries to Trash. Unlike installation, this explicit uninstall may move the add-on's old owned Desktop/Applications launcher entries. It does not remove Codex. If a previously injected UI remains in a disconnected window, it should disappear when that window later exits.
-
-## Updates
-
-Automatic updates are intentionally **disabled** for this build. This candidate removes all legacy update shortcuts and the old `update.json`; updater modules remain for installation safety and compatibility, including disabling and quarantining a verified owned old updater. Check this project's public Releases manually after publication. Any updated package should have a fresh independently published SHA256 checksum and clear change notes.
+徽标通过本机回环地址上的调试接口连接客户端。不要将该接口转发到其他设备。应用更新可能改变内部接口或侧栏结构。

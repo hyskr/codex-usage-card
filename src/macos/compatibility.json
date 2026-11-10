@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "verified": [
+    {
+      "client": {
+        "appName": "ChatGPT.app",
+        "bundleIdentifier": "com.openai.codex",
+        "appVersion": "26.1021.31345",
+        "appBuild": "21828",
+        "executableName": "ChatGPT",
+        "executableRelativePath": "Contents/MacOS/ChatGPT",
+        "cliRelativePath": "Contents/Resources/codex-cli/bin/codex",
+        "cliVersion": "codex-cli 0.164.0-alpha.11.1"
+      },
+      "acceptance": {
+        "addonVersion": "0.9.4",
+        "record": "docs/releases/macos-0.9.4.json",
+        "archiveSHA256": "e41cbb00fd01b785eb0cac73a946115a35dd2d9a2410c196ec7287ce4b1737f8",
+        "versionReadDate": "2026-10-28",
+        "scope": "Exact versions read without changing the Mac that passed v0.9.4 real acceptance. No client version ranges are inferred. v0.9.5 has not undergone real installation acceptance."
+      }
+    },
+    {
+      "client": {
+        "appName": "ChatGPT.app",
+        "bundleIdentifier": "com.openai.codex",
+        "appVersion": "26.1023.51421",
+        "appBuild": "22530",
+        "executableName": "ChatGPT",
+        "executableRelativePath": "Contents/MacOS/ChatGPT",
+        "cliRelativePath": "Contents/Resources/codex-cli/bin/codex",
+        "cliVersion": "codex-cli 0.165.0-alpha.1.2"
+      },
+      "acceptance": {
+        "addonVersion": "0.9.4",
+        "record": "User-confirmed full quit and original-icon relaunch following the 2026-10-28 read-only status verification",
+        "archiveSHA256": "e41cbb00fd01b785eb0cac73a946115a35dd2d9a2410c196ec7287ce4b1737f8",
+        "versionReadDate": "2026-10-28",
+        "originalIconLaunch": "PASS: user confirmed full quit followed by relaunch from original app icon, Ring and remaining usage normal",
+        "usageAndRuntime": "PASS: read-only check confirmed Agent/Startup, one main window/Ring, fresh 5h and weekly readings, UI VERSION 53 and updater disabled",
+        "scope": "macOS v0.9.4 functional acceptance on one updated ChatGPT.app installation only. All eight client, executable and CLI fields were re-read directly on 2026-10-28 and exactly match this record; the user confirmed full quit and original-icon relaunch with Ring and remaining usage normal. v0.9.5 installer not yet installed or accepted. No version range inferred."
+      }
+    }
+  ],
+  "unsupported": []
+}

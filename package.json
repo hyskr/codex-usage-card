@@ -1,0 +1,18 @@
+{
+  "name": "codex-usage-badge-custom",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/tokenizer.mjs --bundle --minify --format=iife --global-name=badgeTokenizer --outfile=build/badge-tokenizer.cjs",
+    "check": "node --check src/agent.cjs && node --check src/manage.cjs",
+    "release": "node scripts/build-release.cjs",
+    "test": "node scripts/test-release.cjs"
+  },
+  "dependencies": {
+    "esbuild": "0.25.12",
+    "js-tiktoken": "1.0.21"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}
