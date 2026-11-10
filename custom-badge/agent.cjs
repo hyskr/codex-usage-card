@@ -180,7 +180,7 @@ class AppServerClient extends require('node:events').EventEmitter {
 }
 
 function installUsageBadge(countTokens) {
-  const VERSION = 67;
+  const VERSION = 68;
   const KEY = '__codexUsageBadge';
   if (window[KEY]?.version === VERSION && window[KEY]?.scope === 'quota-and-speed') {
     window[KEY].place();
@@ -229,7 +229,13 @@ function installUsageBadge(countTokens) {
   cacheMeter.querySelector('.usage-window').textContent = '缓存';
   cacheMeter.setAttribute('aria-label', '缓存命中率：等待用量数据');
   cacheMeter.hidden = true;
-  badge.append(primaryMeter, secondaryMeter, speedMeter, cacheMeter);
+  const contextMeter = document.createElement('div');
+  contextMeter.className = 'usage-context';
+  contextMeter.innerHTML = meterMarkup('-context');
+  contextMeter.querySelector('.usage-window').textContent = '上下文';
+  contextMeter.setAttribute('aria-label', '当前会话上下文：暂无数据');
+  contextMeter.hidden = true;
+  badge.append(primaryMeter, secondaryMeter, contextMeter, speedMeter, cacheMeter);
   const tooltip = document.createElement('div');
   tooltip.id = 'codex-usage-tooltip';
   tooltip.setAttribute('role', 'tooltip');
@@ -264,7 +270,7 @@ function installUsageBadge(countTokens) {
       font-variant-numeric: tabular-nums; line-height: 1;
     }
     #codex-usage-badge[hidden], #codex-usage-tooltip[hidden] { display: none !important; }
-    #codex-usage-badge .usage-primary, #codex-usage-badge .usage-secondary, #codex-usage-badge .usage-cache {
+    #codex-usage-badge .usage-primary, #codex-usage-badge .usage-secondary, #codex-usage-badge .usage-cache, #codex-usage-badge .usage-context {
       position: relative; box-sizing: border-box; width: 100%; flex: 0 0 47px;
       display: flex; flex-direction: column; align-items: center; padding: 35px 0 0; gap: 0;
     }
@@ -290,7 +296,7 @@ function installUsageBadge(countTokens) {
       stroke-dasharray: 100; stroke-dashoffset: 100; transition: stroke-dashoffset 240ms ease;
     }
     #codex-usage-badge .speed-dial .usage-number { position: relative; font-size: 10px; letter-spacing: -.3px; }
-    #codex-usage-badge .usage-speed[hidden], #codex-usage-badge .usage-cache[hidden] { display: none; }
+    #codex-usage-badge .usage-speed[hidden], #codex-usage-badge .usage-cache[hidden], #codex-usage-badge .usage-context[hidden] { display: none; }
     #codex-usage-badge .usage-secondary {
       --usage-color: var(--usage-normal-color); --usage-soft: var(--usage-normal-soft);
       --usage-ring-track: var(--usage-normal-track);
@@ -317,9 +323,10 @@ function installUsageBadge(countTokens) {
     }
     #codex-usage-badge .usage-secondary .usage-ring-value { stroke: url(#codex-usage-ring-gradient-weekly); }
     #codex-usage-badge .usage-cache .usage-ring-value { stroke: url(#codex-usage-ring-gradient-cache); }
+    #codex-usage-badge .usage-context .usage-ring-value { stroke: url(#codex-usage-ring-gradient-context); }
     #codex-usage-badge .usage-number { font-size: 10px; line-height: 14px; font-weight: 700; letter-spacing: -.3px; white-space: nowrap; }
     #codex-usage-badge .usage-primary .usage-number, #codex-usage-badge .usage-secondary .usage-number,
-    #codex-usage-badge .usage-cache .usage-number { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); }
+    #codex-usage-badge .usage-cache .usage-number, #codex-usage-badge .usage-context .usage-number { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); }
     #codex-usage-badge .usage-window { font-size: 8.5px; line-height: 10px; font-weight: 400; color: var(--usage-label); white-space: nowrap; }
     #codex-usage-badge[data-tone="warning"], #codex-usage-badge .usage-secondary[data-tone="warning"] { --usage-color: var(--usage-warning-color); --usage-soft: var(--usage-warning-soft); --usage-ring-track: var(--usage-warning-track); }
     #codex-usage-badge[data-tone="danger"], #codex-usage-badge .usage-secondary[data-tone="danger"] { --usage-color: var(--usage-danger-color); --usage-soft: var(--usage-danger-soft); --usage-ring-track: var(--usage-danger-track); }
@@ -541,8 +548,10 @@ function installUsageBadge(countTokens) {
   let liveSpeed = null;
   let liveSpeedDetails = null;
   let latestCache = null;
+  let latestContext = null;
   let displayedThreadId = null;
   const cacheByThread = new Map();
+  const contextByThread = new Map();
 
   function selectedThreadId() {
     const row = document.querySelector('[data-app-action-sidebar-thread-id][data-app-action-sidebar-thread-active="true"], [data-app-action-sidebar-thread-id][aria-current="page"], [data-app-action-sidebar-thread-id][aria-current="true"]');
@@ -556,9 +565,15 @@ function installUsageBadge(countTokens) {
   function updateDisplayedCache() {
     const threadId = selectedThreadId();
     const next = threadId ? cacheByThread.get(threadId) ?? null : null;
-    if (threadId === displayedThreadId && next === latestCache) return;
+    const context = threadId ? contextByThread.get(threadId) ?? null : null;
+    if (threadId === displayedThreadId && next === latestCache && context === latestContext) return;
     displayedThreadId = threadId;
     latestCache = next;
+    latestContext = context;
+    const usedPercent = context ? context.used / context.limit * 100 : null;
+    renderMeter(contextMeter, { percent: usedPercent, label: '上下文',
+      tone: usedPercent === null ? 'muted' : usedPercent >= 90 ? 'danger' : usedPercent >= 75 ? 'warning' : 'normal',
+      title: context ? `当前会话上下文已用 ${usedPercent.toFixed(1)}%` : '当前会话暂无上下文数据' });
     const cachePercent = next ? next.cached / next.input * 100 : null;
     const detail = cachePercent === null ? '当前会话暂无缓存数据'
       : `当前会话最近请求缓存命中率 ${Math.min(cachePercent < 100 ? 99.99 : 100, cachePercent).toFixed(2)}%`;
@@ -657,6 +672,13 @@ function installUsageBadge(countTokens) {
       if (typeof threadId === 'string' && Number.isFinite(usage?.inputTokens) && usage.inputTokens > 0 &&
           Number.isFinite(usage.cachedInputTokens) && usage.cachedInputTokens >= 0) {
         cacheByThread.set(threadId.toLowerCase(), { input: usage.inputTokens, cached: Math.min(usage.cachedInputTokens, usage.inputTokens) });
+        updateDisplayedCache();
+      }
+      const limit = params?.tokenUsage?.modelContextWindow;
+      const used = usage?.totalTokens;
+      if (typeof threadId === 'string' && Number.isFinite(limit) && limit > 0 &&
+          Number.isFinite(used) && used >= 0) {
+        contextByThread.set(threadId.toLowerCase(), { used, limit });
         updateDisplayedCache();
       }
       const totalOutput = params?.tokenUsage?.total?.outputTokens;
@@ -770,6 +792,22 @@ function installUsageBadge(countTokens) {
     cacheValue.className = 'usage-metric-value';
     cacheValue.textContent = latestCache ? `${Math.min(latestCache.cached < latestCache.input ? 99.99 : 100, latestCache.cached / latestCache.input * 100).toFixed(2)}%` : '暂无数据';
     cacheRow.append(cacheLabel, cacheValue);
+    const contextRow = document.createElement('div');
+    contextRow.className = 'usage-metric';
+    const contextLabel = document.createElement('span');
+    contextLabel.className = 'usage-metric-label';
+    contextLabel.textContent = '当前会话上下文';
+    const contextValue = document.createElement('span');
+    contextValue.className = 'usage-metric-value';
+    contextValue.textContent = latestContext ? `${(latestContext.used / latestContext.limit * 100).toFixed(1)}%` : '暂无数据';
+    contextRow.append(contextLabel, contextValue);
+    metrics.append(contextRow);
+    if (latestContext) {
+      const contextDetail = document.createElement('div');
+      contextDetail.className = 'usage-metric-detail';
+      contextDetail.textContent = `${latestContext.used.toLocaleString()} / ${latestContext.limit.toLocaleString()} token`;
+      metrics.appendChild(contextDetail);
+    }
     metrics.append(speedRow, cacheRow);
     if (latestCache) {
       const cacheDetail = document.createElement('div');
@@ -871,7 +909,8 @@ function installUsageBadge(countTokens) {
       if (!visible(foot) || fr.top <= nr.top || fr.bottom > nr.bottom+2) continue;
       const controls = [...nav.querySelectorAll('button,a,input,[role="button"],[tabindex]')]
         .filter(el => !foot.contains(el) && visible(el)).map(el => el.getBoundingClientRect());
-      for (const [showSpeed, showCache] of [[true, true], [false, true], [false, false]]) {
+      for (const [showContext, showSpeed, showCache] of [[true, true, true], [true, false, true], [true, false, false], [false, false, false]]) {
+        contextMeter.hidden = !showContext;
         speedMeter.hidden = !showSpeed;
         cacheMeter.hidden = !showCache;
         const br = badge.getBoundingClientRect(), gap = 4;
@@ -1039,13 +1078,13 @@ class RendererInjector {
         try{
           if(!existing)await session.connect();
           const version = await session.evaluate('window.__codexUsageBadge?.version');
-          if (version?.result?.value !== 67) await session.evaluate(buildBootstrapScript());
+          if (version?.result?.value !== 68) await session.evaluate(buildBootstrapScript());
           if(this.currentValue)await session.evaluate(`window.__codexUsageBadge?.update(${JSON.stringify(this.currentValue)})`);
           // CDP success is NOT UI acceptance. Query the mounted, visible Ring separately
           // and retain only a fixed reason code (never host DOM, paths or account text).
           const checked=(await session.evaluate('window.__codexUsageBadge?.status() ?? null'))?.result?.value;
           const allowed=new Set(['mounted','not-placed','no-visible-rail','no-valid-footer','no-safe-space','occluded-or-clipped']);
-          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 67;
+          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 68;
           const reason=mounted?'mounted':allowed.has(checked?.mountReason)?checked.mountReason:'no-verified-ui';
           this.mountStatus.set(t.id,{mounted,reason});
           if(this.stopped){session.close();return;}
