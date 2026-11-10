@@ -180,7 +180,7 @@ class AppServerClient extends require('node:events').EventEmitter {
 }
 
 function installUsageBadge(countTokens) {
-  const VERSION = 65;
+  const VERSION = 66;
   const KEY = '__codexUsageBadge';
   if (window[KEY]?.version === VERSION && window[KEY]?.scope === 'quota-and-speed') {
     window[KEY].place();
@@ -516,14 +516,15 @@ function installUsageBadge(countTokens) {
     }).join(', ')})`;
   }
   function renderMeter(element, meter, accessible = true) {
-    const percent = Number.isFinite(meter.percent) ? Math.max(0, Math.min(100, Math.round(meter.percent))) : null;
-    const number = percent === null ? '—' : String(percent);
+    const rawPercent = Number.isFinite(meter.percent) ? Math.max(0, Math.min(100, meter.percent)) : null;
+    const percent = rawPercent === null ? null : Math.round(rawPercent);
+    const number = rawPercent === null ? '—' : String(element === cacheMeter ? Math.floor(rawPercent) : percent);
     element.dataset.tone = meter.tone;
     if (element.querySelector('.usage-window').textContent !== meter.label) element.querySelector('.usage-window').textContent = meter.label;
     if (element.querySelector('.usage-number').textContent !== number) element.querySelector('.usage-number').textContent = number;
     const ring = element.querySelector('.usage-ring-value');
     ring.style.stroke = percent === null ? '' : usageRingColor(percent);
-    ring.style.strokeDashoffset = String(100 - (percent ?? 0));
+    ring.style.strokeDashoffset = String(100 - (rawPercent ?? 0));
     ring.style.opacity = percent !== null && percent > 0 ? '1' : '0';
     if (accessible) {
       element.setAttribute('role', 'meter');
@@ -632,7 +633,7 @@ function installUsageBadge(countTokens) {
         latestCache = { input: usage.inputTokens, cached: Math.min(usage.cachedInputTokens, usage.inputTokens) };
         const cachePercent = latestCache.cached / latestCache.input * 100;
         renderMeter(cacheMeter, { percent: cachePercent, label: '缓存', tone: 'normal',
-          title: `最近请求缓存命中率 ${cachePercent.toFixed(1)}%` });
+          title: `最近请求缓存命中率 ${Math.min(cachePercent < 100 ? 99.99 : 100, cachePercent).toFixed(2)}%` });
         cacheMeter.querySelector('.usage-ring-value').style.stroke = 'var(--usage-color)';
         renderTooltip(value.mode === 'dual' && value.rings?.length === 2);
       }
@@ -745,7 +746,7 @@ function installUsageBadge(countTokens) {
     cacheLabel.textContent = '最近请求缓存';
     const cacheValue = document.createElement('span');
     cacheValue.className = 'usage-metric-value';
-    cacheValue.textContent = latestCache ? `${(latestCache.cached / latestCache.input * 100).toFixed(1)}%` : '等待用量';
+    cacheValue.textContent = latestCache ? `${Math.min(latestCache.cached < latestCache.input ? 99.99 : 100, latestCache.cached / latestCache.input * 100).toFixed(2)}%` : '等待用量';
     cacheRow.append(cacheLabel, cacheValue);
     metrics.append(speedRow, cacheRow);
     if (latestCache) {
@@ -1016,13 +1017,13 @@ class RendererInjector {
         try{
           if(!existing)await session.connect();
           const version = await session.evaluate('window.__codexUsageBadge?.version');
-          if (version?.result?.value !== 65) await session.evaluate(buildBootstrapScript());
+          if (version?.result?.value !== 66) await session.evaluate(buildBootstrapScript());
           if(this.currentValue)await session.evaluate(`window.__codexUsageBadge?.update(${JSON.stringify(this.currentValue)})`);
           // CDP success is NOT UI acceptance. Query the mounted, visible Ring separately
           // and retain only a fixed reason code (never host DOM, paths or account text).
           const checked=(await session.evaluate('window.__codexUsageBadge?.status() ?? null'))?.result?.value;
           const allowed=new Set(['mounted','not-placed','no-visible-rail','no-valid-footer','no-safe-space','occluded-or-clipped']);
-          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 65;
+          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 66;
           const reason=mounted?'mounted':allowed.has(checked?.mountReason)?checked.mountReason:'no-verified-ui';
           this.mountStatus.set(t.id,{mounted,reason});
           if(this.stopped){session.close();return;}
