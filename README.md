@@ -1,3 +1,9 @@
+# Codex Usage Badge 定制版
+
+增加实时活动速度和缓存命中率的定制脚本位于 [custom-badge](custom-badge/README.md)。
+
+---
+
 # Codex Usage Card
 
 **Track your Codex usage directly in the sidebar.**
