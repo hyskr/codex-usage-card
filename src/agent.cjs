@@ -28,7 +28,9 @@ function formatPrimaryRateLimits(response) {
   const windows = [snapshot?.primary, snapshot?.secondary].filter(validWindow);
   const weekly = w => Number.isFinite(w.windowDurationMins) && w.windowDurationMins >= 10080 && w.windowDurationMins % 10080 === 0;
   const plan = String(snapshot?.planType ?? response?.planType ?? '').toLowerCase();
-  const window = plan.startsWith('pro') ? windows.find(weekly) : windows.find(w=>w.windowDurationMins === 300) ?? (!plan ? windows.find(weekly) : null);
+  const fiveHour = windows.find(w => w.windowDurationMins === 300);
+  const week = windows.find(weekly);
+  const window = plan.startsWith('pro') ? week ?? fiveHour : fiveHour ?? week;
   const details = windows.map(w=>`${durationLabel(w.windowDurationMins)}：剩余 ${remainingPercent(w.usedPercent)}%${formatResetTime(w.resetsAt) ? `，${formatResetTime(w.resetsAt)} 重置` : ''}`);
   const percent = window ? remainingPercent(window.usedPercent) : null;
   return {percent, windowLabel: window && weekly(window) ? '周' : '', tone:quotaTone(percent),
@@ -180,7 +182,7 @@ class AppServerClient extends require('node:events').EventEmitter {
 }
 
 function installUsageBadge(countTokens) {
-  const VERSION = 69;
+  const VERSION = 70;
   const KEY = '__codexUsageBadge';
   if (window[KEY]?.version === VERSION && window[KEY]?.scope === 'quota-and-speed') {
     window[KEY].place();
@@ -274,7 +276,7 @@ function installUsageBadge(countTokens) {
       position: relative; box-sizing: border-box; width: 100%; flex: 0 0 47px;
       display: flex; flex-direction: column; align-items: center; padding: 35px 0 0; gap: 0;
     }
-    #codex-usage-badge .usage-secondary[hidden] { display: none !important; }
+    #codex-usage-badge .usage-primary[hidden], #codex-usage-badge .usage-secondary[hidden] { display: none !important; }
     #codex-usage-badge .usage-cache {
       --usage-color: #4572b8; --usage-soft: #6288c5; --usage-ring-track: #dbe5f2;
     }
@@ -344,7 +346,10 @@ function installUsageBadge(countTokens) {
       box-shadow: 0 6px 22px #0002; pointer-events: none;
       font: 12px/1.65 -apple-system, BlinkMacSystemFont, sans-serif;
       white-space: normal; overflow-wrap: anywhere; -webkit-app-region: no-drag;
+      opacity: 0; transform: translateY(3px);
+      transition: opacity 140ms ease, transform 140ms ease;
     }
+    #codex-usage-tooltip[data-open="true"] { opacity: 1; transform: translateY(0); }
     #codex-usage-tooltip .usage-tooltip-title { font-size: 13px; font-weight: 650; letter-spacing: .01em; }
     #codex-usage-tooltip .usage-tooltip-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 14px; }
     #codex-usage-tooltip[data-mode="dual"] .usage-tooltip-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -375,12 +380,14 @@ function installUsageBadge(countTokens) {
         background: var(--color-surface-elevated-secondary, #2c2e2c); color: var(--color-text-primary, #edf0ed);
       }
     }
-    @media (prefers-reduced-motion: reduce) { #codex-usage-badge .usage-ring-value, #codex-usage-badge .speed-value { transition: none; } }
+    @media (prefers-reduced-motion: reduce) { #codex-usage-badge .usage-ring-value, #codex-usage-badge .speed-value, #codex-usage-tooltip { transition: none; } }
   `;
   let value = { percent: null, title: '正在读取 Codex 剩余用量', tone: 'muted', windowLabel: '', mode: 'single', rings: null };
   let placementTimer = null;
   let hoverTimer = null;
   let hideTimer = null;
+  let closeTimer = null;
+  let tooltipDesiredOpen = false;
   let rail = null;
   let footer = null;
   let mountReason = 'not-placed';
@@ -416,7 +423,7 @@ function installUsageBadge(countTokens) {
     }
     return true;
   };
-  function nativeOverlayOpen() {
+  function nativeOverlayOpen(surface = 'badge') {
     return [...document.querySelectorAll(nativeOverlaySelector)].some(el => {
       if (owned(el) || !el.isConnected) return false;
       const r=el.getBoundingClientRect();
@@ -431,19 +438,23 @@ function installUsageBadge(countTokens) {
           if (['hidden','clip','auto','scroll'].includes(css.overflowY)) { top=Math.max(top,clip.top);bottom=Math.min(bottom,clip.bottom); }
         }
       }
-      const badgeRect = !badge.hidden ? badge.getBoundingClientRect() : lastBadgeRect;
-      const tooltipRect = !tooltip.hidden ? tooltip.getBoundingClientRect() : null;
-      return [badgeRect, tooltipRect].some(rect => rect && rect.width > 0 && rect.height > 0 &&
+      const rect = surface === 'tooltip'
+        ? (!tooltip.hidden ? tooltip.getBoundingClientRect() : null)
+        : (!badge.hidden ? badge.getBoundingClientRect() : lastBadgeRect);
+      return rect && rect.width > 0 && rect.height > 0 &&
         right > Math.max(left, rect.left) && left < Math.min(right, rect.right) &&
-        bottom > Math.max(top, rect.top) && top < Math.min(bottom, rect.bottom));
+        bottom > Math.max(top, rect.top) && top < Math.min(bottom, rect.bottom);
     });
   }
   function yieldToNativeOverlay() {
-    if (!nativeOverlayOpen()) return false;
-    mountReason='occluded-or-clipped';
-    badge.hidden=true;
-    hideTooltip();
-    return true;
+    if (nativeOverlayOpen()) {
+      mountReason='occluded-or-clipped';
+      badge.hidden=true;
+      hideTooltip(true);
+      return true;
+    }
+    if (!tooltip.hidden && nativeOverlayOpen('tooltip')) hideTooltip(true);
+    return false;
   }
   function watchNativeOverlays() {
     const nodes=new Set([document.body]);
@@ -478,23 +489,35 @@ function installUsageBadge(countTokens) {
     }
     return true;
   }
-  function hideTooltip() {
+  function hideTooltip(immediate = false) {
     clearTimeout(hoverTimer);
-    hoverTimer = null;
-    tooltip.hidden = true;
     clearTimeout(hideTimer);
+    clearTimeout(closeTimer);
+    hoverTimer = null;
+    hideTimer = null;
+    tooltipDesiredOpen = false;
+    tooltip.dataset.open = 'false';
+    if (tooltip.hidden) return;
+    if (immediate || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      tooltip.hidden = true;
+    } else {
+      closeTimer = setTimeout(() => { tooltip.hidden = true; }, 140);
+    }
   }
   function scheduleHideTooltip() {
+    clearTimeout(hoverTimer);
+    hoverTimer = null;
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
-      if (badge.matches(':hover') || badge === document.activeElement) return;
+      if (badge.matches(':hover') || badge.matches(':focus-visible')) return;
       hideTooltip();
-    }, 250);
+    }, 100);
   }
   function positionTooltip() {
     if (yieldToNativeOverlay()) return;
     const r = badge.getBoundingClientRect();
-    const ringRect = primaryMeter.querySelector('.usage-ring').getBoundingClientRect();
+    const activeMeter = primaryMeter.hidden ? secondaryMeter : primaryMeter;
+    const ringRect = activeMeter.querySelector('.usage-ring').getBoundingClientRect();
     const ringCenterY = ringRect.top + ringRect.height / 2;
     tooltip.style.left = `${Math.max(8, Math.min(r.right + 12, innerWidth - tooltip.offsetWidth - 8))}px`;
     const top = Math.max(8, Math.min(ringCenterY - tooltip.offsetHeight / 2, innerHeight - tooltip.offsetHeight - 8));
@@ -503,14 +526,20 @@ function installUsageBadge(countTokens) {
   function showTooltip() {
     clearTimeout(hoverTimer);
     clearTimeout(hideTimer);
+    clearTimeout(closeTimer);
     if (yieldToNativeOverlay() || badge.hidden || !visible(badge) || document.hidden || disposed) return;
     tooltip.hidden = false;
+    tooltipDesiredOpen = true;
     positionTooltip();
+    requestAnimationFrame(() => {
+      if (!disposed && tooltipDesiredOpen && !tooltip.hidden) tooltip.dataset.open = 'true';
+    });
   }
   function scheduleTooltip() {
     clearTimeout(hoverTimer);
     clearTimeout(hideTimer);
-    hoverTimer = setTimeout(showTooltip, 350);
+    clearTimeout(closeTimer);
+    hoverTimer = setTimeout(showTooltip, 100);
   }
   function usageRingColor(percent) {
     const start = percent >= 50 ? [59, 130, 246] : [239, 68, 68];
@@ -913,7 +942,10 @@ function installUsageBadge(countTokens) {
       if (!visible(foot) || fr.top <= nr.top || fr.bottom > nr.bottom+2) continue;
       const controls = [...nav.querySelectorAll('button,a,input,[role="button"],[tabindex]')]
         .filter(el => !foot.contains(el) && visible(el)).map(el => el.getBoundingClientRect());
-      for (const [showContext, showSpeed, showCache] of [[true, true, true], [true, false, true], [true, false, false], [false, false, false]]) {
+      const layouts = [[true, true, true, false], [true, false, true, false], [true, false, false, false], [false, false, false, false]];
+      if (value.mode === 'dual' && value.rings?.[1]?.key === 'weekly') layouts.push([false, false, false, true]);
+      for (const [showContext, showSpeed, showCache, weeklyOnly] of layouts) {
+        primaryMeter.hidden = weeklyOnly;
         contextMeter.hidden = !showContext;
         speedMeter.hidden = !showSpeed;
         cacheMeter.hidden = !showCache;
@@ -982,7 +1014,8 @@ function installUsageBadge(countTokens) {
   window.addEventListener('scroll', schedulePlacement, true);
   const onNativeToggle = event => { if (!owned(event.target)) { yieldToNativeOverlay(); schedulePlacement(); } };
   document.addEventListener('toggle', onNativeToggle, true);
-  document.addEventListener('visibilitychange', hideTooltip);
+  const onVisibilityChange = () => { if (document.hidden) hideTooltip(true); };
+  document.addEventListener('visibilitychange', onVisibilityChange);
   window[KEY] = {
     version: VERSION,
     scope: 'quota-and-speed',
@@ -1004,11 +1037,11 @@ function installUsageBadge(countTokens) {
       clearInterval(freshnessTimer);
       clearInterval(speedTimer);
       window.removeEventListener('message', onOutputNotification);
-      hideTooltip();
+      hideTooltip(true);
       window.removeEventListener('resize', schedulePlacement);
       window.removeEventListener('scroll', schedulePlacement, true);
       document.removeEventListener('toggle', onNativeToggle, true);
-      document.removeEventListener('visibilitychange', hideTooltip);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       badge.remove(); tooltip.remove(); style.remove();
       delete window[KEY];
     }
@@ -1083,13 +1116,13 @@ class RendererInjector {
         try{
           if(!existing)await session.connect();
           const version = await session.evaluate('window.__codexUsageBadge?.version');
-          if (version?.result?.value !== 69) await session.evaluate(buildBootstrapScript());
+          if (version?.result?.value !== 70) await session.evaluate(buildBootstrapScript());
           if(this.currentValue)await session.evaluate(`window.__codexUsageBadge?.update(${JSON.stringify(this.currentValue)})`);
           // CDP success is NOT UI acceptance. Query the mounted, visible Ring separately
           // and retain only a fixed reason code (never host DOM, paths or account text).
           const checked=(await session.evaluate('window.__codexUsageBadge?.status() ?? null'))?.result?.value;
           const allowed=new Set(['mounted','not-placed','no-visible-rail','no-valid-footer','no-safe-space','occluded-or-clipped']);
-          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 69;
+          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 70;
           const reason=mounted?'mounted':allowed.has(checked?.mountReason)?checked.mountReason:'no-verified-ui';
           this.mountStatus.set(t.id,{mounted,reason});
           if(this.stopped){session.close();return;}
@@ -1144,7 +1177,7 @@ function windowsCodexCandidates(appPath) {
     path.join(root, 'resources', 'codex-cli', 'codex.exe')];
 }
 
-var AGENT_VERSION = '1.0.0';
+var AGENT_VERSION = '1.0.1';
 function parseArgs(argv) {
   const options = {
     port: Number(process.env.CODEX_BADGE_PORT) || 39222,
