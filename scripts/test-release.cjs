@@ -14,7 +14,7 @@ const temporary = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'badge-
 try {
   execFileSync('/usr/bin/ditto', ['-x', '-k', archive, temporary], { stdio: 'inherit' });
   const env = { ...process.env, BADGE_RUNTIME: path.join(temporary, name) };
-  for (const test of ['install.test.cjs', 'renderer.test.cjs']) {
+  for (const test of ['install.test.cjs', 'renderer.test.cjs', 'quota.test.cjs']) {
     execFileSync(process.execPath, [path.join(root, 'tests', test)], { env, stdio: 'inherit' });
   }
 } finally {

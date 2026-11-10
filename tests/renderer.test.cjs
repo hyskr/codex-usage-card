@@ -39,6 +39,13 @@ async function testSelectedConversation() {
   const usage = (threadId, tokens) => notify(window, 'thread/tokenUsage/updated', {
     threadId, tokenUsage: { last: { inputTokens: 100, cachedInputTokens: tokens, totalTokens: tokens * 10 }, modelContextWindow: 1000 },
   });
+  const quotaNotifications = [];
+  window.__codexUsageBadgeQuotaUpdated = payload => quotaNotifications.push(JSON.parse(payload));
+  notify(window, 'account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 82, windowDurationMins: 10080 } } });
+  assert.equal(quotaNotifications[0].rateLimits.primary.usedPercent, 82);
+  window.dispatchEvent(new window.MessageEvent('message', { data: { type: 'mcp-notification',
+    method: 'account/rateLimits/updated', hostId: 'remote', params: { rateLimits: {} } } }));
+  assert.equal(quotaNotifications.length, 1);
   usage(a, 42);
   usage(b, 99);
   assert.equal(number('usage-cache'), '42');

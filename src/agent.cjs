@@ -126,7 +126,7 @@ function formatRateLimits(response) {
 class AppServerClient extends require('node:events').EventEmitter {
   constructor({command='codex', args=['app-server'], requestTimeoutMs=10000}={}) {
     super(); Object.assign(this,{command,args,requestTimeoutMs});
-    this.child=null; this.lines=null; this.pending=new Map(); this.serial=0; this.rateLimits=null;
+    this.child=null; this.lines=null; this.pending=new Map(); this.serial=0; this.rateLimits=null; this.refreshPatches=null;
   }
   async start() {
     if (this.child) return;
@@ -149,8 +149,7 @@ class AppServerClient extends require('node:events').EventEmitter {
         this.pending.delete(message.id); clearTimeout(request.timer);
         message.error ? request.reject(new Error(message.error.message || 'App Server request failed')) : request.resolve(message.result);
       } else if(message.method==='account/rateLimits/updated') {
-        this.rateLimits=mergeRateLimitsResponse(this.rateLimits,message.params);
-        this.emit('rate-limits',this.rateLimits);
+        this.applyRateLimitsNotification(message.params);
       }
     });
     await this.request('initialize',{clientInfo:{name:'codex_usage_badge',title:'Codex Usage Badge',version:AGENT_VERSION}});
@@ -168,9 +167,24 @@ class AppServerClient extends require('node:events').EventEmitter {
       });
     });
   }
+  applyRateLimitsNotification(patch) {
+    if (!isRecord(patch)) return;
+    this.refreshPatches?.push(patch);
+    this.rateLimits = mergeRateLimitsResponse(this.rateLimits, patch);
+    this.emit('rate-limits', this.rateLimits);
+  }
   async refresh() {
-    this.rateLimits=mergeRateLimitsResponse(null,await this.request('account/rateLimits/read'));
-    this.emit('rate-limits',this.rateLimits); return this.rateLimits;
+    const patches = [];
+    this.refreshPatches = patches;
+    try {
+      let snapshot = mergeRateLimitsResponse(null, await this.request('account/rateLimits/read'));
+      for (const patch of patches) snapshot = mergeRateLimitsResponse(snapshot, patch);
+      this.rateLimits = snapshot;
+      this.emit('rate-limits', snapshot);
+      return snapshot;
+    } finally {
+      if (this.refreshPatches === patches) this.refreshPatches = null;
+    }
   }
   stop() {
     const child=this.child; this.child=null;
@@ -182,7 +196,7 @@ class AppServerClient extends require('node:events').EventEmitter {
 }
 
 function installUsageBadge(countTokens) {
-  const VERSION = 70;
+  const VERSION = 71;
   const KEY = '__codexUsageBadge';
   if (window[KEY]?.version === VERSION && window[KEY]?.scope === 'quota-and-speed') {
     window[KEY].place();
@@ -690,7 +704,10 @@ function installUsageBadge(countTokens) {
 
   function onOutputNotification(event) {
     if (event.data?.type !== 'mcp-notification') return;
-    const { method, params } = event.data;
+    const { method, params, hostId } = event.data;
+    if (method === 'account/rateLimits/updated' && (!hostId || hostId === 'local') && params) {
+      window.__codexUsageBadgeQuotaUpdated?.(JSON.stringify(params));
+    }
     const now = performance.now() / 1000;
     const threadId = params?.threadId;
     let session = sessions.get(threadId);
@@ -1063,7 +1080,7 @@ function buildBootstrapScript() {
   return `(() => { ${tokenizer}\n(${installUsageBadge.toString()})(badgeTokenizer.countTokens); })()`;
 }
 class CdpSession {
-  constructor(target) {this.target=target;this.pending=new Map();this.serial=0;this.socket=null;}
+  constructor(target, onRateLimits) {this.target=target;this.onRateLimits=onRateLimits;this.pending=new Map();this.serial=0;this.socket=null;}
   async connect() {
     let u;
     try {u=new URL(this.target.webSocketDebuggerUrl);}
@@ -1072,6 +1089,10 @@ class CdpSession {
     const ws=new WebSocket(u);this.socket=ws;
     ws.addEventListener('message',event=>{
       let msg;try{msg=JSON.parse(event.data);}catch{return;}
+      if (msg.method === 'Runtime.bindingCalled' && msg.params?.name === '__codexUsageBadgeQuotaUpdated') {
+        try { this.onRateLimits?.(JSON.parse(msg.params.payload)); } catch {}
+        return;
+      }
       const p=this.pending.get(msg?.id);if(!p)return;
       this.pending.delete(msg.id);clearTimeout(p.timer);
       msg.error || msg.result?.exceptionDetails ? p.reject(new Error('CDP evaluation failed')) : p.resolve(msg.result);
@@ -1086,6 +1107,7 @@ class CdpSession {
       ws.addEventListener('close',()=>finish(()=>reject(new Error('CDP closed'))),{once:true});
     });
     await this.request('Runtime.enable');
+    await this.request('Runtime.addBinding', { name: '__codexUsageBadgeQuotaUpdated' });
   }
   request(method,params={}) {
     if(this.socket?.readyState!==WebSocket.OPEN)return Promise.reject(new Error('CDP disconnected'));
@@ -1112,17 +1134,17 @@ class RendererInjector {
       const live=new Set(pages.map(t=>t.id));
       for(const[id,s]of this.sessions)if(!live.has(id)){s.close();this.sessions.delete(id);this.mountStatus.delete(id);}
       await Promise.all(pages.map(async t=>{
-        const existing=this.sessions.get(t.id), session=existing || new CdpSession(t);
+        const existing=this.sessions.get(t.id), session=existing || new CdpSession(t, patch => this.onRateLimits?.(patch));
         try{
           if(!existing)await session.connect();
           const version = await session.evaluate('window.__codexUsageBadge?.version');
-          if (version?.result?.value !== 70) await session.evaluate(buildBootstrapScript());
+          if (version?.result?.value !== 71) await session.evaluate(buildBootstrapScript());
           if(this.currentValue)await session.evaluate(`window.__codexUsageBadge?.update(${JSON.stringify(this.currentValue)})`);
           // CDP success is NOT UI acceptance. Query the mounted, visible Ring separately
           // and retain only a fixed reason code (never host DOM, paths or account text).
           const checked=(await session.evaluate('window.__codexUsageBadge?.status() ?? null'))?.result?.value;
           const allowed=new Set(['mounted','not-placed','no-visible-rail','no-valid-footer','no-safe-space','occluded-or-clipped']);
-          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 70;
+          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 71;
           const reason=mounted?'mounted':allowed.has(checked?.mountReason)?checked.mountReason:'no-verified-ui';
           this.mountStatus.set(t.id,{mounted,reason});
           if(this.stopped){session.close();return;}
@@ -1177,13 +1199,13 @@ function windowsCodexCandidates(appPath) {
     path.join(root, 'resources', 'codex-cli', 'codex.exe')];
 }
 
-var AGENT_VERSION = '1.0.1';
+var AGENT_VERSION = '1.0.2';
 function parseArgs(argv) {
   const options = {
     port: Number(process.env.CODEX_BADGE_PORT) || 39222,
     appPath: process.env.CODEX_BADGE_APP || (process.platform === 'win32' ? '' : '/Applications/ChatGPT.app'),
     codexBin: process.env.CODEX_BADGE_BIN || 'codex',
-    pollMs: Number(process.env.CODEX_BADGE_POLL_MS) || 60000
+    pollMs: Number(process.env.CODEX_BADGE_POLL_MS) || 15000
   };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port') options.port = Number(argv[++i]);
@@ -1256,6 +1278,9 @@ async function main() {
   let connected = false;
   let mounted = false;
   let bodySpeeds = [];
+  injector.onRateLimits = patch => {
+    if (client && !stopped) client.applyRateLimitsNotification(patch);
+  };
 
   injector.currentValue = {
     percent: null,
@@ -1400,6 +1425,7 @@ module.exports = {
   resolveCodexBin,
   readBodySpeeds,
   AppServerClient,
+  RendererInjector,
   main
 };
 
