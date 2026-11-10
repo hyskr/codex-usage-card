@@ -180,7 +180,7 @@ class AppServerClient extends require('node:events').EventEmitter {
 }
 
 function installUsageBadge(countTokens) {
-  const VERSION = 66;
+  const VERSION = 67;
   const KEY = '__codexUsageBadge';
   if (window[KEY]?.version === VERSION && window[KEY]?.scope === 'quota-and-speed') {
     window[KEY].place();
@@ -541,6 +541,31 @@ function installUsageBadge(countTokens) {
   let liveSpeed = null;
   let liveSpeedDetails = null;
   let latestCache = null;
+  let displayedThreadId = null;
+  const cacheByThread = new Map();
+
+  function selectedThreadId() {
+    const row = document.querySelector('[data-app-action-sidebar-thread-id][data-app-action-sidebar-thread-active="true"], [data-app-action-sidebar-thread-id][aria-current="page"], [data-app-action-sidebar-thread-id][aria-current="true"]');
+    const reference = row?.getAttribute('data-app-action-sidebar-thread-id') ?? '';
+    const match = reference.match(/^(?:local:)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+    if (match) return match[1].toLowerCase();
+    return `${location.pathname}${location.search}${location.hash}`
+      .match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1].toLowerCase() ?? null;
+  }
+
+  function updateDisplayedCache() {
+    const threadId = selectedThreadId();
+    const next = threadId ? cacheByThread.get(threadId) ?? null : null;
+    if (threadId === displayedThreadId && next === latestCache) return;
+    displayedThreadId = threadId;
+    latestCache = next;
+    const cachePercent = next ? next.cached / next.input * 100 : null;
+    const detail = cachePercent === null ? '当前会话暂无缓存数据'
+      : `当前会话最近请求缓存命中率 ${Math.min(cachePercent < 100 ? 99.99 : 100, cachePercent).toFixed(2)}%`;
+    renderMeter(cacheMeter, { percent: cachePercent, label: '缓存', tone: next ? 'normal' : 'muted', title: detail });
+    cacheMeter.querySelector('.usage-ring-value').style.stroke = 'var(--usage-color)';
+    renderTooltip(value.mode === 'dual' && value.rings?.length === 2);
+  }
 
   function liveSpeedDescription() {
     return liveSpeed === null ? '实时活动：等待输出' : `实时活动：${liveSpeed.toFixed(1)} tok/s（圆环刻度 150）`;
@@ -598,6 +623,7 @@ function installUsageBadge(countTokens) {
   }
 
   function refreshSpeed() {
+    updateDisplayedCache();
     const now = performance.now() / 1000;
     let total = 0;
     for (const [threadId, session] of sessions) {
@@ -628,14 +654,10 @@ function installUsageBadge(countTokens) {
       sessions.set(threadId, session);
     } else if (method === 'thread/tokenUsage/updated') {
       const usage = params?.tokenUsage?.last;
-      if (Number.isFinite(usage?.inputTokens) && usage.inputTokens > 0 &&
+      if (typeof threadId === 'string' && Number.isFinite(usage?.inputTokens) && usage.inputTokens > 0 &&
           Number.isFinite(usage.cachedInputTokens) && usage.cachedInputTokens >= 0) {
-        latestCache = { input: usage.inputTokens, cached: Math.min(usage.cachedInputTokens, usage.inputTokens) };
-        const cachePercent = latestCache.cached / latestCache.input * 100;
-        renderMeter(cacheMeter, { percent: cachePercent, label: '缓存', tone: 'normal',
-          title: `最近请求缓存命中率 ${Math.min(cachePercent < 100 ? 99.99 : 100, cachePercent).toFixed(2)}%` });
-        cacheMeter.querySelector('.usage-ring-value').style.stroke = 'var(--usage-color)';
-        renderTooltip(value.mode === 'dual' && value.rings?.length === 2);
+        cacheByThread.set(threadId.toLowerCase(), { input: usage.inputTokens, cached: Math.min(usage.cachedInputTokens, usage.inputTokens) });
+        updateDisplayedCache();
       }
       const totalOutput = params?.tokenUsage?.total?.outputTokens;
       if (session && Number.isFinite(totalOutput)) {
@@ -743,10 +765,10 @@ function installUsageBadge(countTokens) {
     cacheRow.className = 'usage-metric';
     const cacheLabel = document.createElement('span');
     cacheLabel.className = 'usage-metric-label';
-    cacheLabel.textContent = '最近请求缓存';
+    cacheLabel.textContent = '当前会话缓存';
     const cacheValue = document.createElement('span');
     cacheValue.className = 'usage-metric-value';
-    cacheValue.textContent = latestCache ? `${Math.min(latestCache.cached < latestCache.input ? 99.99 : 100, latestCache.cached / latestCache.input * 100).toFixed(2)}%` : '等待用量';
+    cacheValue.textContent = latestCache ? `${Math.min(latestCache.cached < latestCache.input ? 99.99 : 100, latestCache.cached / latestCache.input * 100).toFixed(2)}%` : '暂无数据';
     cacheRow.append(cacheLabel, cacheValue);
     metrics.append(speedRow, cacheRow);
     if (latestCache) {
@@ -1017,13 +1039,13 @@ class RendererInjector {
         try{
           if(!existing)await session.connect();
           const version = await session.evaluate('window.__codexUsageBadge?.version');
-          if (version?.result?.value !== 66) await session.evaluate(buildBootstrapScript());
+          if (version?.result?.value !== 67) await session.evaluate(buildBootstrapScript());
           if(this.currentValue)await session.evaluate(`window.__codexUsageBadge?.update(${JSON.stringify(this.currentValue)})`);
           // CDP success is NOT UI acceptance. Query the mounted, visible Ring separately
           // and retain only a fixed reason code (never host DOM, paths or account text).
           const checked=(await session.evaluate('window.__codexUsageBadge?.status() ?? null'))?.result?.value;
           const allowed=new Set(['mounted','not-placed','no-visible-rail','no-valid-footer','no-safe-space','occluded-or-clipped']);
-          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 66;
+          const mounted=checked?.placed === true && checked?.badgeCount === 1 && checked?.version === 67;
           const reason=mounted?'mounted':allowed.has(checked?.mountReason)?checked.mountReason:'no-verified-ui';
           this.mountStatus.set(t.id,{mounted,reason});
           if(this.stopped){session.close();return;}
