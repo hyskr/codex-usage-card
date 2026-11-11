@@ -20,6 +20,8 @@ process.env.CODEX_BADGE_APP = app;
 delete process.env.CODEX_HOME;
 
 const jobs = new Set();
+const dialogChoices = [];
+let kickstarts = 0;
 const execFileSync = childProcess.execFileSync;
 childProcess.execFileSync = (file, args, options) => {
   if (file === '/bin/launchctl') {
@@ -34,12 +36,14 @@ childProcess.execFileSync = (file, args, options) => {
       }
       return 'state = running';
     }
+    if (action === 'kickstart') { kickstarts++; return ''; }
     if (action === 'bootout') {
       jobs.delete(args[1]);
       return '';
     }
     if (action === 'bootstrap') {
-      const label = path.basename(args[2], '.plist');
+      const basename = path.basename(args[2], '.plist');
+      const label = basename === 'activate-once' ? 'com.codexusagebadge.activate-once' : basename;
       jobs.add(`gui/${process.getuid()}/${label}`);
       if (label === 'com.codexusagebadge.startup') {
         const receipt = path.join(temporary, 'Library/Application Support/CodexUsageBadge/startup-helper/state.json');
@@ -48,7 +52,9 @@ childProcess.execFileSync = (file, args, options) => {
       return '';
     }
   }
-  if (file === '/usr/bin/plutil' || file.endsWith('/macos/startup/bridge')) return '{}';
+  if (file === '/usr/bin/osascript') return dialogChoices.shift() ?? '好';
+  if (file === '/usr/bin/plutil') return '{}';
+  if (file.endsWith('/macos/startup/bridge') || file.endsWith('/startup-helper/bridge')) return JSON.stringify({ apps: [] });
   return execFileSync(file, args, options);
 };
 
@@ -67,14 +73,25 @@ global.fetch = async () => { throw new Error('no window in fixture'); };
     const manager = require(path.join(runtime, 'manage.cjs'));
     assert.equal(manager.expectedUiVersion(), 72);
     await manager.install();
+    assert.equal(await manager.recoveryStatus(), 'Codex 尚未启动。打开 Codex 后徽标将尝试自动连接。');
     const directory = path.join(temporary, 'Library/Application Support/CodexUsageBadge');
     assert.equal(fs.readFileSync(path.join(directory, 'agent.cjs'), 'utf8'), fs.readFileSync(path.join(runtime, 'agent.cjs'), 'utf8'));
     assert.equal(fs.readFileSync(path.join(directory, 'badge-tokenizer.cjs'), 'utf8'), fs.readFileSync(path.join(runtime, 'badge-tokenizer.cjs'), 'utf8'));
-    assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'installed-version.json'))).version, '1.0.4');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'installed-version.json'))).version, '1.1.0');
+    const shortcut = path.join(temporary, 'Applications/Codex 徽标管理.app');
+    assert.equal(fs.readlinkSync(shortcut), path.join(directory, 'manager-app/Codex 徽标管理.app'));
+    assert.ok(fs.statSync(path.join(directory, 'manager-app/Codex 徽标管理.app/Contents/MacOS/manager')).mode & 0o100);
     await manager.install();
+    dialogChoices.push('重新连接', '关闭');
+    await manager.managerUi();
+    assert.equal(kickstarts, 2, 'both services are restarted');
+    dialogChoices.push('退出后恢复', '好');
+    await manager.managerUi();
+    assert.ok(jobs.has(`gui/${process.getuid()}/com.codexusagebadge.activate-once`));
     await manager.uninstall();
     assert.equal(fs.existsSync(directory), false);
     assert.equal(jobs.size, 0);
+    assert.equal(fs.existsSync(shortcut), false);
     const trash = path.join(temporary, '.Trash');
     assert.equal(fs.readdirSync(trash).length, 1);
     console.log('Fresh installation, upgrade and uninstall verified in an isolated home.');

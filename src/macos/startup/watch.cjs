@@ -34,11 +34,16 @@ const adapter={
     socket.setTimeout(350,()=>done(true));
   }),
   async record(event,details={}) {
-    state={...state,...details,event,updatedAt:Date.now()};
+    state={...state,...details,message:details.message ?? null,event,updatedAt:Date.now()};
     const temp=receipt+'.tmp';
     fs.writeFileSync(temp,JSON.stringify(state,null,2)+'\n',{mode:0o600});
     fs.renameSync(temp,receipt);
     console.log(new Date().toISOString(),event);
+    if ((event === 'watching' && details.connectionState === 'needs-relaunch') || event === 'skipped-active-or-background') {
+      execFile('/usr/bin/osascript', ['-e',
+        'display notification "请打开应用程序中的 Codex 徽标管理，选择退出后恢复。" with title "Codex 徽标等待连接"'],
+      { timeout: 5000 }, () => {});
+    }
   }
 };
 const controller=new StartupController(adapter,{lastAttemptAt:state.lastAttemptAt||0,allowClientRestart});
@@ -56,7 +61,7 @@ async function pump() {
     }
   } finally {
     pumping=false;
-    if(controller.pendingLaunch&&!stopped)pendingTimer=setTimeout(pump,300);
+    if(controller.pendingLaunch&&!stopped)pendingTimer=setTimeout(pump,controller.baselined ? 300 : 2000);
   }
 }
 // NSWorkspace notifications, not a tight loop spawning native processes while idle.

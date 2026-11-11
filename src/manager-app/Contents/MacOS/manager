@@ -1,0 +1,6 @@
+#!/bin/sh
+node_path=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$HOME/Library/LaunchAgents/com.codexusagebadge.agent.plist" 2>/dev/null)
+if [ -x "$node_path" ]; then
+  exec "$node_path" "$HOME/Library/Application Support/CodexUsageBadge/manage.cjs" ui
+fi
+/usr/bin/osascript -e 'display alert "无法启动徽标管理" message "请重新运行安装包中的安装.command。"'

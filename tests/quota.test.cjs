@@ -26,7 +26,11 @@ async function testRendererBridge() {
   const OriginalWebSocket = global.WebSocket;
   const childProcess = require('node:child_process');
   const originalExecFile = childProcess.execFile;
-  childProcess.execFile = (file, args, options, callback) => callback(null, JSON.stringify({ apps: [{ argumentsKnown: true, debugPort: '62104' }] }));
+  let snapshotFails = false;
+  childProcess.execFile = (file, args, options, callback) => {
+    if (snapshotFails) return callback(Error('temporary snapshot failure'));
+    callback(null, JSON.stringify({ apps: [{ argumentsKnown: true, debugPort: '62104' }] }));
+  };
   let socket;
   class FakeWebSocket {
     static OPEN = 1;
@@ -69,6 +73,10 @@ async function testRendererBridge() {
     injector.onRateLimits = patch => received.push(patch);
     await injector.scan();
     assert.equal(injector.activePort, 62104);
+    snapshotFails = true;
+    await injector.scan();
+    assert.equal(injector.sessions.size, 1, 'transient discovery failure retains the current connection');
+    snapshotFails = false;
     assert.ok(socket.methods.some(message => message.method === 'Runtime.addBinding' &&
       message.params.name === '__codexUsageBadgeQuotaUpdated'));
     socket.dispatch('message', { data: JSON.stringify({ method: 'Runtime.bindingCalled',

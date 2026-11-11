@@ -1131,10 +1131,16 @@ class RendererInjector {
       const { execFile } = require('node:child_process');
       const path = require('node:path');
       const bridge = path.join(require('node:os').homedir(), 'Library/Application Support/CodexUsageBadge/startup-helper/bridge');
-      const snapshot = await new Promise((resolve, reject) => execFile(bridge, ['snapshot', this.appPath], { timeout: 15000 }, (error, stdout) => {
-        if (error) return reject(error);
-        try { resolve(JSON.parse(stdout)); } catch (failure) { reject(failure); }
-      }));
+      let snapshot;
+      try {
+        snapshot = await new Promise((resolve, reject) => execFile(bridge, ['snapshot', this.appPath], { timeout: 15000 }, (error, stdout) => {
+          if (error) return reject(error);
+          try { resolve(JSON.parse(stdout)); } catch (failure) { reject(failure); }
+        }));
+      } catch (error) {
+        if (this.sessions.size) return;
+        throw error;
+      }
       const apps = snapshot.apps ?? [];
       const detected = apps.length === 1 && apps[0].argumentsKnown ? Number(apps[0].debugPort) : 0;
       const port = Number.isInteger(detected) && detected > 0 && detected <= 65535 ? detected : this.port;
@@ -1213,7 +1219,7 @@ function windowsCodexCandidates(appPath) {
     path.join(root, 'resources', 'codex-cli', 'codex.exe')];
 }
 
-var AGENT_VERSION = '1.0.4';
+var AGENT_VERSION = '1.1.0';
 function parseArgs(argv) {
   const options = {
     port: Number(process.env.CODEX_BADGE_PORT) || 39222,

@@ -23,7 +23,11 @@ class StartupController {
       if(!this.baselined) {
         for(const app of snapshot.apps)this.seen.add(app.key);
         this.baselined=true;
-        await this.adapter.record('watching',{existingApps:snapshot.apps.length});
+        const current = snapshot.apps.length === 1 ? snapshot.apps[0] : null;
+        const connectionState = !current ? 'waiting-for-codex'
+          : !current.argumentsKnown ? 'detecting'
+          : current.debugPort === null ? 'needs-relaunch' : 'port-detected';
+        await this.adapter.record('watching',{existingApps:snapshot.apps.length,connectionState});
         return;
       }
       const fresh=snapshot.apps.filter(app=>!this.seen.has(app.key));
@@ -90,6 +94,7 @@ class StartupController {
       if(this.stopped)return;
       await this.adapter.record('reopened',{shown:!!shown.shown,processKey:opened.key});
     } catch(error) {
+      if (!this.baselined) this.pendingLaunch = true;
       await this.adapter.record('error',{message:error.message}).catch(()=>{});
     } finally { this.busy=false; }
   }
