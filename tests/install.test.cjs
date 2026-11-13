@@ -72,6 +72,18 @@ global.fetch = async () => { throw new Error('no window in fixture'); };
   try {
     const manager = require(path.join(runtime, 'manage.cjs'));
     assert.equal(manager.expectedUiVersion(), 72);
+    let checks = 0;
+    await manager.waitForExit({
+      isRunning: () => {
+        checks++;
+        if (checks === 1) throw new Error('temporary snapshot failure');
+        return checks < 3;
+      },
+      sleep: async () => {},
+      now: () => 0,
+      timeoutMs: 10000,
+    });
+    assert.equal(checks, 4, 'temporary detection failure does not cancel recovery');
     await manager.install();
     assert.equal(await manager.recoveryStatus(), 'Codex 尚未启动。打开 Codex 后徽标将尝试自动连接。');
     const directory = path.join(temporary, 'Library/Application Support/CodexUsageBadge');

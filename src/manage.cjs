@@ -462,9 +462,10 @@ async function evaluate(target,expression) {
   return (await cdp(target,'Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true})).result?.value;
 }
 function appRunning() {
-  let executable=path.basename(app,'.app');
-  try { executable=command('/usr/libexec/PlistBuddy',['-c','Print :CFBundleExecutable',path.join(app,'Contents/Info.plist')]).trim(); } catch {}
-  return command('/bin/ps',['-Ao','comm=']).split('\n').some(s=>s.trim()===path.join(app,'Contents/MacOS',executable));
+  const bridge = fs.existsSync(path.join(startupDir, 'bridge')) ? path.join(startupDir, 'bridge') : bridgeSource;
+  const snapshot = JSON.parse(command(bridge, ['snapshot', app]));
+  if (!Array.isArray(snapshot.apps)) throw new Error('无法读取 Codex 运行状态');
+  return snapshot.apps.length > 0;
 }
 function record(value) {
   fs.writeFileSync(path.join(installDir,'状态.json'),JSON.stringify({time:new Date().toISOString(),version:VERSION,...value},null,2)+'\n');
@@ -479,11 +480,15 @@ async function waitForExit({isRunning=appRunning,sleep=pause,now=Date.now,timeou
   const deadline=now()+timeoutMs;
   for(;;) {
     if(now()>=deadline)throw new Error('等待退出已结束。稍后完全退出 Codex 后，从原应用图标打开即可。');
-    if(!isRunning()) {
-      await sleep(500);
-      if(!isRunning())return;
+    try {
+      if(!isRunning()) {
+        await sleep(500);
+        if(!isRunning())return;
+      }
+    } catch {
+      // Continue waiting when the native status check is temporarily unavailable.
     }
-    await sleep(250);
+    await sleep(1000);
   }
 }
 async function activateAfterExit() {
